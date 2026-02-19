@@ -6,13 +6,13 @@ on:
       task_graph_path:
         required: false
         type: string
-        default: darkfactory/tasks/sample-epic.json
+        default: darkfactory/tasks
   workflow_dispatch:
     inputs:
       task_graph_path:
-        description: "Path to task graph JSON"
+        description: "Path to task graph JSON file or directory"
         required: false
-        default: darkfactory/tasks/sample-epic.json
+        default: darkfactory/tasks
   schedule:
     - cron: "*/10 * * * *"
   issues:
@@ -46,13 +46,13 @@ jobs:
 
       - name: Reconcile task DAG
         run: |
-          GRAPH_PATH="${{ inputs.task_graph_path || github.event.inputs.task_graph_path || 'darkfactory/tasks/sample-epic.json' }}"
+          GRAPH_PATH="${{ inputs.task_graph_path || github.event.inputs.task_graph_path || 'darkfactory/tasks' }}"
           node darkforge-core/darkfactory/scripts/reconcile-tasks.js "$GRAPH_PATH"
 
       - name: Commit DAG changes
         run: |
           git config user.name "darkforge-bot"
           git config user.email "darkforge-bot@users.noreply.github.com"
-          git add "${{ inputs.task_graph_path || github.event.inputs.task_graph_path || 'darkfactory/tasks/sample-epic.json' }}" || true
+          git add darkfactory/tasks/*.json || true
           git diff --cached --quiet || git commit -m "chore(orchestrator): reconcile task states"
           git push || true
