@@ -1,7 +1,18 @@
 name: DarkForge Orchestrator
 
 on:
+  workflow_call:
+    inputs:
+      task_graph_path:
+        required: false
+        type: string
+        default: darkfactory/tasks/sample-epic.json
   workflow_dispatch:
+    inputs:
+      task_graph_path:
+        description: "Path to task graph JSON"
+        required: false
+        default: darkfactory/tasks/sample-epic.json
   schedule:
     - cron: "*/10 * * * *"
   issues:
@@ -17,20 +28,31 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: darkforge-orchestrator-${{ github.ref }}
+  group: darkforge-orchestrator-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   reconcile:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Checkout darkforge core
+        uses: actions/checkout@v4
+        with:
+          repository: plus-ultra-industries/darkforge
+          path: darkforge-core
+
       - name: Reconcile task DAG
-        run: node darkfactory/scripts/reconcile-tasks.js darkfactory/tasks/sample-epic.json
+        run: |
+          GRAPH_PATH="${{ inputs.task_graph_path || github.event.inputs.task_graph_path || 'darkfactory/tasks/sample-epic.json' }}"
+          node darkforge-core/darkfactory/scripts/reconcile-tasks.js "$GRAPH_PATH"
+
       - name: Commit DAG changes
         run: |
           git config user.name "darkforge-bot"
           git config user.email "darkforge-bot@users.noreply.github.com"
-          git add darkfactory/tasks/*.json
+          git add "${{ inputs.task_graph_path || github.event.inputs.task_graph_path || 'darkfactory/tasks/sample-epic.json' }}" || true
           git diff --cached --quiet || git commit -m "chore(orchestrator): reconcile task states"
           git push || true

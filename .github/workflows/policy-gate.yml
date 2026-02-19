@@ -1,6 +1,7 @@
 name: DarkForge Policy Gate
 
 on:
+  workflow_call:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
