@@ -1,0 +1,146 @@
+name: DarkForge Planner
+
+on:
+  workflow_call:
+    inputs:
+      epic_number:
+        required: true
+        type: number
+  workflow_dispatch:
+    inputs:
+      epic_number:
+        description: "Epic issue number"
+        required: true
+        type: number
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: darkforge-planner-${{ github.repository }}-${{ inputs.epic_number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  decompose:
+    if: ${{ github.event_name != 'issues' || contains(github.event.issue.title, '[EPIC]') || contains(join(github.event.issue.labels.*.name, ','), 'df:intake') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve epic number
+        id: epic
+        run: |
+          EPIC="${{ inputs.epic_number || github.event.inputs.epic_number || github.event.issue.number }}"
+          echo "number=$EPIC" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure DarkForge labels exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              {name: 'df:blocked', color: 'B60205', description: 'Task blocked by dependencies'},
+              {name: 'df:ready', color: '0E8A16', description: 'Task ready for execution'},
+              {name: 'df:task', color: '1D76DB', description: 'DarkForge generated task'},
+              {name: 'df:epic-child', color: '5319E7', description: 'Generated from epic decomposition'}
+            ];
+            for (const label of labels) {
+              try {
+                await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name: label.name });
+              } catch (e) {
+                if (e.status === 404) {
+                  await github.rest.issues.createLabel({ owner: context.repo.owner, repo: context.repo.repo, ...label });
+                } else {
+                  throw e;
+                }
+              }
+            }
+
+      - name: Build task graph from epic
+        id: graph
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const epicNumber = Number('${{ steps.epic.outputs.number }}');
+            const { data: epic } = await github.rest.issues.get({ owner: context.repo.owner, repo: context.repo.repo, issue_number: epicNumber });
+
+            const slug = epic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || `epic-${epicNumber}`;
+            const tasks = [
+              { id: `E${epicNumber}-T1`, title: 'Core QA run pipeline (project -> run -> findings)', owner_role: 'engineer', status: 'ready', depends_on: [], parallelizable: false, acceptance: ['Can trigger run manually', 'Findings persisted'] },
+              { id: `E${epicNumber}-T2`, title: 'Browser checks + screenshot evidence capture', owner_role: 'engineer', status: 'blocked', depends_on: [`E${epicNumber}-T1`], parallelizable: true, acceptance: ['Failure screenshots captured', 'Basic reproducible repro steps'] },
+              { id: `E${epicNumber}-T3`, title: 'QA report and export markdown for client handoff', owner_role: 'engineer', status: 'blocked', depends_on: [`E${epicNumber}-T1`], parallelizable: true, acceptance: ['Run summary view exists', 'Export markdown generated'] },
+              { id: `E${epicNumber}-T4`, title: 'Review/fix loop + merge readiness gate integration', owner_role: 'engineer', status: 'blocked', depends_on: [`E${epicNumber}-T2`, `E${epicNumber}-T3`], parallelizable: false, acceptance: ['Needs-fix loop works', 'Ready-to-merge condition exposed'] }
+            ];
+
+            const graph = { epic_issue: epicNumber, epic_title: epic.title, epic_slug: slug, satisfaction: 0, tasks };
+            core.setOutput('json', JSON.stringify(graph));
+            core.setOutput('path', `darkfactory/tasks/${slug}.json`);
+
+      - name: Write task graph file
+        run: |
+          mkdir -p darkfactory/tasks
+          cat > "${{ steps.graph.outputs.path }}" <<'EOF'
+          ${{ steps.graph.outputs.json }}
+          EOF
+
+      - name: Create/sync child issues from task graph
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const graph = JSON.parse(`${{ steps.graph.outputs.json }}`);
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const listAll = async () => {
+              const all = [];
+              let page = 1;
+              while (true) {
+                const { data } = await github.rest.issues.listForRepo({ owner, repo, state: 'all', per_page: 100, page });
+                if (!data.length) break;
+                all.push(...data.filter(i => !i.pull_request));
+                page++;
+              }
+              return all;
+            };
+
+            const allIssues = await listAll();
+
+            for (const task of graph.tasks) {
+              const marker = `DarkForge-Task-ID: ${task.id}`;
+              const body = [
+                `Parent Epic: #${graph.epic_issue}`,
+                marker,
+                `Owner Role: ${task.owner_role}`,
+                `Parallelizable: ${task.parallelizable}`,
+                `Depends-On: ${task.depends_on.length ? task.depends_on.join(', ') : 'none'}`,
+                '',
+                '## Task',
+                task.title,
+                '',
+                '## Acceptance Criteria',
+                ...task.acceptance.map(a => `- ${a}`)
+              ].join('\n');
+
+              const title = `[TASK] ${task.title}`;
+              const existing = allIssues.find(i => (i.body || '').includes(marker));
+
+              const labels = ['df:task', 'df:epic-child', task.status === 'ready' ? 'df:ready' : 'df:blocked'];
+
+              if (existing) {
+                await github.rest.issues.update({ owner, repo, issue_number: existing.number, title, body });
+                await github.rest.issues.setLabels({ owner, repo, issue_number: existing.number, labels });
+              } else {
+                await github.rest.issues.create({ owner, repo, title, body, labels });
+              }
+            }
+
+      - name: Commit planner artifacts
+        run: |
+          git config user.name "darkforge-bot"
+          git config user.email "darkforge-bot@users.noreply.github.com"
+          git add darkfactory/tasks/*.json
+          git diff --cached --quiet || git commit -m "feat(planner): decompose epic #${{ steps.epic.outputs.number }} into task graph"
+          git push || true
