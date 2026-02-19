@@ -1,0 +1,70 @@
+name: DarkForge LLM Stage
+
+on:
+  workflow_call:
+    inputs:
+      stage:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
+      output_path:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  run-stage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Checkout darkforge core
+        uses: actions/checkout@v4
+        with:
+          repository: plus-ultra-industries/darkforge
+          path: darkforge-core
+
+      - name: Fetch issue payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const issueNumber = Number('${{ inputs.issue_number }}');
+            const { data: issue } = await github.rest.issues.get({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issueNumber });
+            fs.mkdirSync('darkfactory/runtime', { recursive: true });
+            fs.writeFileSync('darkfactory/runtime/issue.json', JSON.stringify({ number: issue.number, title: issue.title, body: issue.body || '' }, null, 2));
+
+      - name: Generate stage output with LLM
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DARKFORGE_MODEL: ${{ vars.DARKFORGE_MODEL }}
+        run: |
+          mkdir -p "$(dirname '${{ inputs.output_path }}')"
+          node darkforge-core/darkfactory/scripts/llm-role.js "${{ inputs.stage }}" darkfactory/runtime/issue.json "${{ inputs.output_path }}"
+
+      - name: Commit stage artifact
+        run: |
+          git config user.name "darkforge-bot"
+          git config user.email "darkforge-bot@users.noreply.github.com"
+          git add "${{ inputs.output_path }}"
+          git diff --cached --quiet || git commit -m "feat(stage:${{ inputs.stage }}): issue #${{ inputs.issue_number }} artifact"
+          git push || true
+
+      - name: Comment stage result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const content = fs.readFileSync('${{ inputs.output_path }}', 'utf8').slice(0, 4000);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number('${{ inputs.issue_number }}'),
+              body: `## DarkForge ${{ inputs.stage }} output\n\nSaved to: \`${{ inputs.output_path }}\`\n\n${content}`
+            });
