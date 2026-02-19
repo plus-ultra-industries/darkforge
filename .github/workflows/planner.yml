@@ -30,6 +30,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout darkforge core
+        uses: actions/checkout@v4
+        with:
+          repository: plus-ultra-industries/darkforge
+          path: darkforge-core
 
       - name: Resolve epic number
         id: epic
@@ -77,7 +82,7 @@ jobs:
 
       - name: Generate PM/TPM/Architect plan (LLM-backed)
         run: |
-          node darkfactory/scripts/llm-plan.js "${{ steps.epic.outputs.number }}" "${{ steps.epic_payload.outputs.jsonPath }}" "${{ steps.epic_payload.outputs.planPath }}"
+          node darkforge-core/darkfactory/scripts/llm-plan.js "${{ steps.epic.outputs.number }}" "${{ steps.epic_payload.outputs.jsonPath }}" "${{ steps.epic_payload.outputs.planPath }}"
 
       - name: Build task graph from generated plan
         id: graph
