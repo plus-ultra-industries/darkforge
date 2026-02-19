@@ -5,13 +5,13 @@ on:
     inputs:
       epic_number:
         required: true
-        type: number
+        type: string
   workflow_dispatch:
     inputs:
       epic_number:
         description: "Epic issue number"
         required: true
-        type: number
+        type: string
   issues:
     types: [opened, labeled]
 
