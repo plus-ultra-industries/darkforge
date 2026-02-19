@@ -16,8 +16,10 @@
       "id": "T2",
       "title": "Add session revocation UI",
       "owner_role": "engineer",
-      "status": "blocked",
-      "depends_on": ["T1"],
+      "status": "ready",
+      "depends_on": [
+        "T1"
+      ],
       "parallelizable": true,
       "issue_number": 102
     }
