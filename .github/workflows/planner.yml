@@ -59,38 +59,52 @@ jobs:
               }
             }
 
-      - name: Build task graph from epic
-        id: graph
+      - name: Fetch epic payload
+        id: epic_payload
         uses: actions/github-script@v7
         with:
           script: |
             const epicNumber = Number('${{ steps.epic.outputs.number }}');
             const { data: epic } = await github.rest.issues.get({ owner: context.repo.owner, repo: context.repo.repo, issue_number: epicNumber });
-
             const slug = epic.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || `epic-${epicNumber}`;
-            const tasks = [
-              { id: `E${epicNumber}-T1`, title: 'Core QA run pipeline (project -> run -> findings)', owner_role: 'engineer', status: 'ready', depends_on: [], parallelizable: false, acceptance: ['Can trigger run manually', 'Findings persisted'] },
-              { id: `E${epicNumber}-T2`, title: 'Browser checks + screenshot evidence capture', owner_role: 'engineer', status: 'blocked', depends_on: [`E${epicNumber}-T1`], parallelizable: true, acceptance: ['Failure screenshots captured', 'Basic reproducible repro steps'] },
-              { id: `E${epicNumber}-T3`, title: 'QA report and export markdown for client handoff', owner_role: 'engineer', status: 'blocked', depends_on: [`E${epicNumber}-T1`], parallelizable: true, acceptance: ['Run summary view exists', 'Export markdown generated'] },
-              { id: `E${epicNumber}-T4`, title: 'Review/fix loop + merge readiness gate integration', owner_role: 'engineer', status: 'blocked', depends_on: [`E${epicNumber}-T2`, `E${epicNumber}-T3`], parallelizable: false, acceptance: ['Needs-fix loop works', 'Ready-to-merge condition exposed'] }
-            ];
+            const payload = { number: epicNumber, title: epic.title, body: epic.body || '', slug };
+            core.setOutput('slug', slug);
+            core.setOutput('jsonPath', `darkfactory/tasks/${slug}.epic.json`);
+            core.setOutput('planPath', `darkfactory/tasks/${slug}.plan.json`);
+            core.setOutput('graphPath', `darkfactory/tasks/${slug}.json`);
+            require('fs').mkdirSync('darkfactory/tasks', { recursive: true });
+            require('fs').writeFileSync(`darkfactory/tasks/${slug}.epic.json`, JSON.stringify(payload, null, 2));
 
-            const graph = { epic_issue: epicNumber, epic_title: epic.title, epic_slug: slug, satisfaction: 0, tasks };
-            core.setOutput('json', JSON.stringify(graph));
-            core.setOutput('path', `darkfactory/tasks/${slug}.json`);
-
-      - name: Write task graph file
+      - name: Generate PM/TPM/Architect plan (LLM-backed)
         run: |
-          mkdir -p darkfactory/tasks
-          cat > "${{ steps.graph.outputs.path }}" <<'EOF'
-          ${{ steps.graph.outputs.json }}
-          EOF
+          node darkfactory/scripts/llm-plan.js "${{ steps.epic.outputs.number }}" "${{ steps.epic_payload.outputs.jsonPath }}" "${{ steps.epic_payload.outputs.planPath }}"
+
+      - name: Build task graph from generated plan
+        id: graph
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const epic = JSON.parse(fs.readFileSync('${{ steps.epic_payload.outputs.jsonPath }}','utf8'));
+          const plan = JSON.parse(fs.readFileSync('${{ steps.epic_payload.outputs.planPath }}','utf8'));
+          const tasks = (plan.architect?.tasks || []).map((t, idx) => ({
+            id: t.id || `E${epic.number}-T${idx+1}`,
+            title: t.title,
+            owner_role: t.owner_role || 'engineer',
+            status: (t.depends_on && t.depends_on.length) ? 'blocked' : 'ready',
+            depends_on: t.depends_on || [],
+            parallelizable: !!t.parallelizable,
+            acceptance: t.acceptance || []
+          }));
+          const graph = { epic_issue: epic.number, epic_title: epic.title, epic_slug: epic.slug, satisfaction: 0, tasks, pm: plan.pm || {}, tpm: plan.tpm || {} };
+          fs.writeFileSync('${{ steps.epic_payload.outputs.graphPath }}', JSON.stringify(graph, null, 2));
+          NODE
 
       - name: Create/sync child issues from task graph
         uses: actions/github-script@v7
         with:
           script: |
-            const graph = JSON.parse(`${{ steps.graph.outputs.json }}`);
+            const fs = require('fs');
+            const graph = JSON.parse(fs.readFileSync('${{ steps.epic_payload.outputs.graphPath }}', 'utf8'));
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
@@ -136,6 +150,30 @@ jobs:
                 await github.rest.issues.create({ owner, repo, title, body, labels });
               }
             }
+
+      - name: Post planning summary to epic
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const graph = JSON.parse(fs.readFileSync('${{ steps.epic_payload.outputs.graphPath }}', 'utf8'));
+            const pmSummary = graph.pm?.summary || 'PM summary generated.';
+            const tpmRec = graph.tpm?.recommendation || 'TPM recommendation generated.';
+            const body = [
+              '## DarkForge Planner Output',
+              '',
+              `- PM: ${pmSummary}`,
+              `- TPM Recommendation: ${tpmRec}`,
+              `- Tasks Generated: ${graph.tasks.length}`,
+              '',
+              `Task graph file: \`${{ steps.epic_payload.outputs.graphPath }}\``
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number('${{ steps.epic.outputs.number }}'),
+              body
+            });
 
       - name: Commit planner artifacts
         run: |
