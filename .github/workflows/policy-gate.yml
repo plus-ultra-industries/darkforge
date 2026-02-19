@@ -1,0 +1,19 @@
+name: DarkForge Policy Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Evaluate policy (stub)
+        run: |
+          echo "Checking CI, eng review, QA label, satisfaction..."
+          echo "PoC stub: implement darkfactory/scripts/policy-check.js"

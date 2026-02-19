@@ -1,0 +1,25 @@
+{
+  "epic": "sample-auth-improvement",
+  "satisfaction": 0,
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Refactor auth middleware",
+      "owner_role": "engineer",
+      "status": "done",
+      "depends_on": [],
+      "parallelizable": false,
+      "issue_number": 101,
+      "pr_number": 55
+    },
+    {
+      "id": "T2",
+      "title": "Add session revocation UI",
+      "owner_role": "engineer",
+      "status": "blocked",
+      "depends_on": ["T1"],
+      "parallelizable": true,
+      "issue_number": 102
+    }
+  ]
+}

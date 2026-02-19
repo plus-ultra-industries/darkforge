@@ -1,0 +1,36 @@
+name: DarkForge Orchestrator
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+  issues:
+    types: [opened, edited, labeled, unlabeled, reopened, closed]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: darkforge-orchestrator-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconcile task DAG
+        run: node darkfactory/scripts/reconcile-tasks.js darkfactory/tasks/sample-epic.json
+      - name: Commit DAG changes
+        run: |
+          git config user.name "darkforge-bot"
+          git config user.email "darkforge-bot@users.noreply.github.com"
+          git add darkfactory/tasks/*.json
+          git diff --cached --quiet || git commit -m "chore(orchestrator): reconcile task states"
+          git push || true

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DarkForge Task Graph",
+  "type": "object",
+  "required": ["epic", "tasks"],
+  "properties": {
+    "epic": { "type": "string" },
+    "satisfaction": { "type": "number", "minimum": 0, "maximum": 1 },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "status", "depends_on", "parallelizable"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "owner_role": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["blocked", "ready", "in_progress", "done"]
+          },
+          "depends_on": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "parallelizable": { "type": "boolean" },
+          "issue_number": { "type": "integer" },
+          "pr_number": { "type": "integer" }
+        }
+      }
+    }
+  }
+}

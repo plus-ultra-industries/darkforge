@@ -1,0 +1,41 @@
+version: 0.1
+name: darkforge
+
+model:
+  provider: openai
+  default: gpt-5
+
+policy:
+  required_ci_checks:
+    - test
+    - lint
+  require_eng_review: true
+  require_qa_pass: true
+  satisfaction_threshold: 0.92
+  max_fix_loops: 3
+
+labels:
+  stages:
+    intake: "stage:intake"
+    pm_done: "stage:pm-done"
+    tpm_done: "stage:tpm-done"
+    arch_done: "stage:arch-done"
+    eng_in_progress: "stage:eng-in-progress"
+    eng_review: "stage:eng-review"
+    qa: "stage:qa"
+    ready_to_merge: "stage:ready-to-merge"
+    done: "stage:done"
+  flags:
+    blocked: "df:blocked"
+    ready: "df:ready"
+    needs_fix: "df:needs-fix"
+    qa_pass: "df:qa-pass"
+    qa_fail: "df:qa-fail"
+
+orchestrator:
+  safety_reconcile_cron: "*/10 * * * *"
+  stale_task_hours: 8
+
+qa:
+  scenario_path: "darkfactory/scenarios"
+  preview_url_template: "https://preview.example.com/pr/{pr_number}"

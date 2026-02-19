@@ -1,0 +1,11 @@
+required:
+  - ci_green
+  - eng_review_pass
+  - qa_pass
+  - satisfaction_threshold
+
+thresholds:
+  satisfaction: 0.92
+
+retry:
+  max_fix_loops: 3
